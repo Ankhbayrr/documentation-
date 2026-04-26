@@ -1,279 +1,118 @@
-# 🛡️ Wazuh → IRIS интеграц (Шинэчилсэн гарын авлага)
+# Wazuh → DFIR-IRIS Холболтын Заавар
 
-## 🎯 Зорилго
+## Товч тайлбар
 
-Энэхүү заавар нь Wazuh SIEM дээр үүссэн alert-уудыг **IRIS Incident Response System** рүү API ашиглан автоматаар илгээх бүрэн процессийг тайлбарлана.
-
----
-
-# 🧱 Архитектур
-
-```
-Wazuh → Integration Script → IRIS API (/alerts/add) → IRIS Alerts
-```
+Энэхүү заавар нь Wazuh SIEM системээс гарсан alert-уудыг DFIR-IRIS систем рүү custom Python script ашиглан илгээхийг тайлбарлана.
 
 ---
 
-# 1️⃣ IRIS API Key авах
+## Архитектур
 
-1. IRIS руу нэвтрэх
-
-   ```
-   https://SERVER_IP
-   ```
-
-2. Login хийх
-
-3. **Settings → API Keys**
-
-4. Шинэ API key үүсгэх
-
-5. Copy хийх:
-
-   ```
-   YOUR_IRIS_API_KEY
-   ```
+Wazuh → Custom Script → IRIS API
 
 ---
 
-# 2️⃣ IRIS API endpoint
+## 1. Script байрлуулах
 
-ШИНЭ зөв endpoint:
+Зам:
+/var/ossec/integrations/custom-iris.py
 
-```
-POST https://SERVER_IP/alerts/add
-```
+Permission тохируулах:
 
-Header:
-
-```json
-{
-  "Authorization": "Bearer YOUR_IRIS_API_KEY",
-  "Content-Type": "application/json"
-}
-```
+sudo chmod 750 /var/ossec/integrations/custom-iris.py
+sudo chown root:wazuh /var/ossec/integrations/custom-iris.py
 
 ---
 
-# 3️⃣ Curl ашиглан тест хийх (ШАЛГАХ)
+## 2. Python шаардлага
 
-Доорх нь **баталгаатай ажиллах payload**:
-
-```bash
-curl -k -X POST "https://192.168.1.149/alerts/add" \
-  -H "Authorization: Bearer YOUR_IRIS_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "alert_title": "Wazuh Alert - CIS Ubuntu Linux",
-    "alert_description": "Ensure inactive password lock is configured.",
-    "alert_source": "Wazuh",
-    "alert_source_ref": "1776860982.803392",
-    "alert_source_link": "",
-    "alert_source_content": {
-      "rule_id": "19007",
-      "rule_level": 7,
-      "agent_name": "ankhaa-Vitualbox",
-      "decoder": "sca",
-      "result": "failed"
-    },
-    "alert_severity_id": 3,
-    "alert_status_id": 3,
-    "alert_context": {
-      "source": "wazuh",
-      "type": "sca"
-    },
-    "alert_source_event_time": "2026-04-22T20:29:42",
-    "alert_note": "Auto from Wazuh",
-    "alert_tags": "wazuh,sca",
-    "alert_iocs": [],
-    "alert_assets": [
-      {
-        "asset_name": "ankhaa-Vitualbox",
-        "asset_description": "Linux host",
-        "asset_type_id": 1,
-        "asset_ip": "",
-        "asset_domain": "",
-        "asset_tags": "linux,wazuh",
-        "asset_enrichment": {}
-      }
-    ],
-    "alert_customer_id": 1,
-    "alert_classification_id": 1
-  }'
-```
+sudo apt update
+sudo apt install -y python3 python3-pip
+pip3 install requests
 
 ---
 
-# 4️⃣ Wazuh Integration Script
+## 3. Script
 
-Файл үүсгэх:
-
-```bash
-nano /var/ossec/integrations/custom-iris
-```
+(Өмнөх хэсэгт өгсөн Python кодыг ашиглана)
 
 ---
 
-## 📌 Python Script (ШИНЭ)
+## 4. Wazuh тохиргоо
 
-```python
-#!/usr/bin/env python3
+Файл:
+/var/ossec/etc/ossec.conf
 
-import sys
-import json
-import requests
-from datetime import datetime, UTC
+Дараахыг нэмнэ:
 
-API_URL = "https://192.168.1.149/alerts/add"
-API_KEY = "YOUR_IRIS_API_KEY"
-
-# alert унших (last line fix)
-with open(sys.argv[1], "r") as f:
-    lines = [l.strip() for l in f if l.strip()]
-    alert = json.loads(lines[-1])
-
-rule = alert.get("rule", {})
-agent = alert.get("agent", {})
-data = alert.get("data", {})
-sca = data.get("sca", {})
-check = sca.get("check", {})
-
-# severity mapping (IRIS)
-level = rule.get("level", 0)
-if level >= 12:
-    severity = 4
-elif level >= 8:
-    severity = 3
-elif level >= 5:
-    severity = 2
-else:
-    severity = 1
-
-payload = {
-    "alert_title": rule.get("description"),
-    "alert_description": check.get("description", "Wazuh alert"),
-    "alert_source": "Wazuh",
-    "alert_source_ref": alert.get("id"),
-    "alert_source_link": "",
-    "alert_source_content": {
-        "rule_id": rule.get("id"),
-        "rule_level": level,
-        "agent_name": agent.get("name"),
-        "decoder": alert.get("decoder", {}).get("name"),
-        "result": check.get("result")
-    },
-    "alert_severity_id": severity,
-    "alert_status_id": 3,
-    "alert_context": {
-        "source": "wazuh",
-        "type": "sca"
-    },
-    "alert_source_event_time": alert.get("timestamp"),
-    "alert_note": "Auto from Wazuh",
-    "alert_tags": "wazuh,sca",
-    "alert_iocs": [],
-    "alert_assets": [
-        {
-            "asset_name": agent.get("name"),
-            "asset_description": "Wazuh monitored host",
-            "asset_type_id": 1,
-            "asset_ip": agent.get("ip", ""),
-            "asset_domain": "",
-            "asset_tags": "linux,wazuh",
-            "asset_enrichment": {}
-        }
-    ],
-    "alert_customer_id": 1,
-    "alert_classification_id": 1
-}
-
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
-
-requests.post(API_URL, json=payload, headers=headers, verify=False)
-```
-
----
-
-# 5️⃣ Permission
-
-```bash
-chmod 750 /var/ossec/integrations/custom-iris
-chown root:wazuh /var/ossec/integrations/custom-iris
-```
-
----
-
-# 6️⃣ ossec.conf тохируулах
-
-```xml
 <integration>
-  <name>custom-iris</name>
-  <level>5</level>
+  <name>custom-iris.py</name>
+  <hook_url>https://IRIS-IP/alerts/add</hook_url>
+  <api_key>YOUR_API_KEY</api_key>
   <alert_format>json</alert_format>
+  <level>3</level>
 </integration>
-```
 
 ---
 
-# 7️⃣ Restart
+## 5. Wazuh restart
 
-```bash
-systemctl restart wazuh-manager
-```
+sudo systemctl restart wazuh-manager
 
----
+Docker:
 
-# 8️⃣ Тест хийх
-
-```bash
-tail -n 1 /var/ossec/logs/alerts/alerts.json > /tmp/test.json
-
-python3 /var/ossec/integrations/custom-iris /tmp/test.json dummy dummy
-```
+docker compose restart wazuh.manager
 
 ---
 
-# 9️⃣ Амжилт шалгах
+## 6. Гар тест
 
-IRIS → **Alerts хэсэгт шинэ alert гарсан байна**
-
----
-
-# ⚠️ Алдаа засах
-
-## 415 Unsupported Media Type
-
-➡ JSON буруу
-➡ Header буруу
-➡ newline орсон
+python3 custom-iris.py /tmp/test.json API_KEY https://IRIS-IP/alerts/add
 
 ---
 
-## 401 Unauthorized
+## 7. Алдаа шалгах
 
-➡ API key буруу
+Лог харах:
 
----
+tail -f /var/ossec/logs/ossec.log
 
-## Alert ирэхгүй
+API тест:
 
-➡ level бага
-➡ integration ажиллахгүй
-
----
-
-# 🚀 Дүгнэлт
-
-Та одоо:
-
-* Wazuh → IRIS интеграц хийсэн
-* Автомат alert pipeline үүсгэсэн
-* SOC workflow ашиглах боломжтой болсон
+curl -k -X POST https://IRIS-IP/alerts/add -H "Authorization: Bearer API_KEY" -H "Content-Type: application/json"
 
 ---
 
-Хэрвээ дараагийн шат руу явбал:
-👉 IRIS дээр **case auto-create + playbook automation + SOAR integration** хийж болно
+## 8. Нийтлэг алдаа
+
+Permission алдаа:
+
+chmod 750 custom-iris.py
+
+requests module байхгүй:
+
+pip3 install requests
+
+401 алдаа:
+
+API key буруу
+
+400 алдаа:
+
+Шаардлагатай field дутуу:
+- alert_title
+- alert_description
+- alert_source
+- alert_source_ref
+- alert_severity_id
+- alert_status_id
+- alert_customer_id
+
+---
+
+## Үр дүн
+
+Амжилттай тохируулсны дараа:
+
+- Wazuh alert-ууд IRIS дээр автоматаар орно
+- SOC analyst шууд triage хийх боломжтой
