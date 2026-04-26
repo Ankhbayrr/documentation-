@@ -27,8 +27,7 @@
 
 ### Файл зам
 
-```bash
-/var/ossec/integrations/custom-iris.py
+nano /var/ossec/integrations/custom-iris.py
 
 Permission тохиргоо
 sudo chmod 750 /var/ossec/integrations/custom-iris.py
@@ -51,6 +50,7 @@ python3 -c "import requests; print('OK')"
 Wazuh alert JSON уншина
 Severity map хийнэ
 IRIS API руу POST request илгээнэ
+
 #!/usr/bin/env python3
 import sys
 import json
